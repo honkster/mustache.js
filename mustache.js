@@ -15,18 +15,16 @@ var Mustache = function() {
     pragmas_implemented: {
       "IMPLICIT-ITERATOR": true
     },
-    context: {},
-
-    render: function(template, context, partials, in_recursion) {
+    render: function(template, context, partials, parent_context) {
       // reset buffer & set context
-      if(!in_recursion) {
+      if(!parent_context) {
         this.context = context;
         this.buffer = []; // TODO: make this non-lazy
       }
 
       // fail fast
       if(!this.includes("", template)) {
-        if(in_recursion) {
+        if(parent_context) {
           return template;
         } else {
           this.send(template);
@@ -35,13 +33,15 @@ var Mustache = function() {
       }
 
       template = this.render_pragmas(template);
-      var html = this.render_section(template, context, partials);
-      if(in_recursion) {
-        return this.render_tags(html, context, partials, in_recursion);
+      var html = this.render_section(template, context, partials, parent_context);
+      if(parent_context) {
+        return this.render_tags(html, context, partials, parent_context);
       }
 
-      this.render_tags(html, context, partials, in_recursion);
+      this.render_tags(html, context, partials, parent_context);
     },
+
+    context: {},
 
     /*
       Sends parsed lines
@@ -89,15 +89,15 @@ var Mustache = function() {
         throw({message: "unknown_partial '" + name + "'"});
       }
       if(typeof(context[name]) != "object") {
-        return this.render(partials[name], context, partials, true);
+        return this.render(partials[name], context, partials, context);
       }
-      return this.render(partials[name], context[name], partials, true);
+      return this.render(partials[name], context[name], partials, context);
     },
 
     /*
       Renders inverted (^) and normal (#) sections
     */
-    render_section: function(template, context, partials) {
+    render_section: function(template, context, partials, parent_context) {
       if(!this.includes("#", template) && !this.includes("^", template)) {
         return template;
       }
@@ -110,30 +110,28 @@ var Mustache = function() {
 
       // for each {{#foo}}{{/foo}} section do...
       return template.replace(regex, function(match, type, name, content) {
-        var value = that.find(name, context);
+        var value = that.find(name, context, parent_context);
         if(type == "^") { // inverted section
           if(!value || that.is_array(value) && value.length === 0) {
             // false or empty list, render it
-            return that.render(content, context, partials, true);
+            return that.render(content, context, partials, that.merge(parent_context));
           } else {
             return "";
           }
         } else if(type == "#") { // normal section
           if(that.is_array(value)) { // Enumerable, Let's loop!
             return that.map(value, function(row) {
-              return that.render(content, that.create_context(row),
-                partials, true);
+              return that.render(content, that.create_context(row), partials, that.merge(context, parent_context));
             }).join("");
           } else if(that.is_object(value)) { // Object, Use it as subcontext!
-            return that.render(content, that.create_context(value),
-              partials, true);
+            return that.render(content, that.create_context(value), partials, that.merge(context, parent_context));
           } else if(typeof value === "function") {
             // higher order section
             return value.call(context, content, function(text) {
-              return that.render(text, context, partials, true);
+              return that.render(text, context, partials, that.merge(context));
             });
           } else if(value) { // boolean section
-            return that.render(content, context, partials, true);
+            return that.render(content, context, partials, that.merge(context));
           } else {
             return "";
           }
@@ -144,7 +142,7 @@ var Mustache = function() {
     /*
       Replace {{foo}} and friends with values from our view
     */
-    render_tags: function(template, context, partials, in_recursion) {
+    render_tags: function(template, context, partials, parent_context) {
       // tit for tat
       var that = this;
 
@@ -165,20 +163,20 @@ var Mustache = function() {
         case ">": // render partial
           return that.render_partial(name, context, partials);
         case "{": // the triple mustache is unescaped
-          return that.find(name, context);
+          return that.find(name, context, parent_context);
         default: // escape the value
-          return that.escape(that.find(name, context));
+          return that.escape(that.find(name, context, parent_context));
         }
       };
       var lines = template.split("\n");
       for(var i = 0; i < lines.length; i++) {
         lines[i] = lines[i].replace(regex, tag_replace_callback, this);
-        if(!in_recursion) {
+        if(!parent_context) {
           this.send(lines[i]);
         }
       }
 
-      if(in_recursion) {
+      if(parent_context) {
         return lines.join("\n");
       }
     },
@@ -207,18 +205,15 @@ var Mustache = function() {
       find `name` in current `context`. That is find me a value
       from the view object
     */
-    find: function(name, context) {
+    find: function(name, context, parent_context) {
       name = this.trim(name);
 
-      // Checks whether a value is thruthy or false or 0
-      function is_kinda_truthy(bool) {
-        return bool === false || bool === 0 || bool;
-      }
-
       var value;
-      if(is_kinda_truthy(context[name])) {
+      if(this.is_kinda_truthy(context[name])) {
         value = context[name];
-      } else if(is_kinda_truthy(this.context[name])) {
+      } else if (this.is_kinda_truthy(parent_context) && this.is_kinda_truthy(parent_context[name])) {
+        value = parent_context[name];
+      } else if(this.is_kinda_truthy(this.context[name])) {
         value = this.context[name];
       }
 
@@ -300,6 +295,23 @@ var Mustache = function() {
         }
         return r;
       }
+    },
+
+    merge: function() {
+      var object = {};
+      for (var i = 0; i < arguments.length; i++) {
+        for (var key in arguments[i]) {
+          if (!this.is_kinda_truthy(object[key]) && this.is_kinda_truthy(arguments[i][key])) {
+            object[key] = arguments[i][key];
+          }
+        }
+      }
+      return object;
+    },
+
+    // Checks whether a value is thruthy or false or 0
+    is_kinda_truthy: function(bool) {
+      return bool === false || bool === 0 || bool;
     }
   };
 

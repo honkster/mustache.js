@@ -318,6 +318,7 @@ var Mustache = function() {
   return({
     name: "mustache.js",
     version: "0.3.0-dev",
+    Renderer: Renderer,
 
     /*
       Turns a template and view into HTML

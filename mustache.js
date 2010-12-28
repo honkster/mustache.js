@@ -66,7 +66,7 @@ var Mustache = function() {
             this.ctag);
       return template.replace(regex, function(match, pragma, options) {
         if(!that.pragmas_implemented[pragma]) {
-          throw({message: 
+          throw({message:
             "This implementation of mustache doesn't understand the '" +
             pragma + "' pragma"});
         }
@@ -239,11 +239,12 @@ var Mustache = function() {
     */
     escape: function(s) {
       s = String(s === null ? "" : s);
-      return s.replace(/&(?!\w+;)|["<>\\]/g, function(s) {
+      return s.replace(/&(?!\w+;)|["'<>\\]/g, function(s) {
         switch(s) {
         case "&": return "&amp;";
         case "\\": return "\\\\";
-        case '"': return '\"';
+        case '"': return '&quot;';
+        case "'": return '&#39;';
         case "<": return "&lt;";
         case ">": return "&gt;";
         default: return s;
@@ -317,7 +318,7 @@ var Mustache = function() {
 
   return({
     name: "mustache.js",
-    version: "0.3.0-dev",
+    version: "0.3.1-dev",
     Renderer: Renderer,
 
     /*
